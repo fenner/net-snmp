@@ -1,0 +1,38 @@
+#!/bin/sh
+
+. ../support/simple_eval_tools.sh
+
+HEADER UDP Transport inside network namespace
+
+SKIPIFNOT NETSNMP_TRANSPORT_UDP_DOMAIN
+SKIPIFNOT HAVE_SETNS
+
+# We need to be able to create the network namespace and
+# configure the loopback interface inside.
+[ "x`id -u`" != "x0" ] && SKIP Not running as root
+
+NETNS=blue
+
+# We use the unusual tactic of testing with a class E address.
+# This is because we must use an address that we can guarantee
+# is not assigned to the outer namespace.  (E.g., 127.0.0.42
+# won't work, since Linux commonly routes 127/8 to lo).
+SNMP_TRANSPORT_SPEC=udp
+SNMP_TEST_DEST="240.0.0.42@@${NETNS}:"
+
+# Make sure to clean up after ourselves no matter why we exit
+CLEANUP() {
+    ip netns del $NETNS
+}
+
+trap CLEANUP EXIT
+
+# Create the network namespace
+ip netns add $NETNS
+ip netns exec $NETNS ip addr add 240.0.0.42/32 dev lo
+ip netns exec $NETNS ip link set lo up
+
+# Test both client and server namespace socket handling:
+# both snmpd and snmpget are run in the default namespace,
+# but the socket exists only in the $NETNS namespace.
+. ./Stransport

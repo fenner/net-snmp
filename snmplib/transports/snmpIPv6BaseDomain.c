@@ -299,6 +299,8 @@ netsnmp_sockaddr_in6_3(struct netsnmp_ep *ep,
         addr->sin6_port = htons(atoi(ep_str.port));
     if (ep_str.iface[0])
         strlcpy(ep->iface, ep_str.iface, sizeof(ep->iface));
+    if (ep_str.ns[0])
+        strlcpy(ep->ns, ep_str.ns, sizeof(ep->ns));
     if (ep_str.addr[0]) {
         char *scope_id;
 
