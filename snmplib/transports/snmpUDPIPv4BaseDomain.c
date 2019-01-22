@@ -138,18 +138,31 @@ netsnmp_udpipv4base_transport_init(const struct netsnmp_ep *ep, int local)
 }
 
 int
-netsnmp_udpipv4base_transport_socket(int flags)
+netsnmp_udpipv4base_transport_socket_ns(int flags, const char *ns)
 {
     int local = flags & NETSNMP_TSPEC_LOCAL;
-    int sock = socket(PF_INET, SOCK_DGRAM, 0);
+    int sock;
 
-    DEBUGMSGTL(("UDPBase", "opened socket %d as local=%d\n", sock, local));
+    if (ns && *ns) {
+        sock = netsnmp_socketat(ns, PF_INET, SOCK_DGRAM, 0);
+    } else {
+        sock = socket(PF_INET, SOCK_DGRAM, 0);
+    }
+
+    DEBUGMSGTL(("UDPBase", "opened socket %d in namespace %s as local=%d\n", sock,
+             ( ns && *ns ) ? ns : "<default>", local));
     if (sock < 0)
         return -1;
 
     _netsnmp_udp_sockopt_set(sock, local);
 
     return sock;
+}
+
+int
+netsnmp_udpipv4base_transport_socket(int flags)
+{
+    return netsnmp_udpipv4base_transport_socket_ns(flags, NULL);
 }
 
 int
@@ -288,7 +301,7 @@ netsnmp_udpipv4base_transport_with_source(const struct netsnmp_ep *ep,
         bind_addr = src_addr;
 
     if (-1 == t->sock)
-        t->sock = netsnmp_udpipv4base_transport_socket(flags);
+        t->sock = netsnmp_udpipv4base_transport_socket_ns(flags, ep->ns);
     if (t->sock < 0) {
         netsnmp_transport_free(t);
         return NULL;

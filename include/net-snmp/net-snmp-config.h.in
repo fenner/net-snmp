@@ -824,6 +824,9 @@
 /* Define to 1 if you have the `setmntent' function. */
 #undef HAVE_SETMNTENT
 
+/* Define to 1 if you have the `setns' function. */
+#undef HAVE_SETNS
+
 /* Define to 1 if you have the `setsid' function. */
 #undef HAVE_SETSID
 

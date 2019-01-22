@@ -105,6 +105,8 @@ netsnmp_sockaddr_in3(struct netsnmp_ep *ep,
         addr->sin_port = htons(atoi(ep_str.port));
     if (ep_str.iface[0])
         strlcpy(ep->iface, ep_str.iface, sizeof(ep->iface));
+    if (ep_str.ns[0])
+        strlcpy(ep->ns, ep_str.ns, sizeof(ep->ns));
     if (strcmp(ep_str.addr, "255.255.255.255") == 0) {
         /*
          * The explicit broadcast address hack
