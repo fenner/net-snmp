@@ -1,0 +1,36 @@
+#!/bin/sh
+
+. ../support/simple_eval_tools.sh
+
+HEADER UDP6 Transport inside network namespace
+
+SKIPIFNOT NETSNMP_TRANSPORT_UDPIPV6_DOMAIN
+SKIPIFNOT HAVE_SETNS
+
+# We need to be able to create the network namespace and
+# configure the loopback interface inside.
+[ "x`id -u`" != "x0" ] && SKIP Not running as root
+
+NETNS=blue
+
+SNMP_TRANSPORT_SPEC=udp6
+SNMP_TEST_DEST="[::42]@@${NETNS}:"
+
+# Make sure to clean up after ourselves no matter why we exit
+CLEANUP() {
+    ip netns del $NETNS
+}
+
+trap CLEANUP EXIT
+
+# Create the network namespace
+ip netns add $NETNS
+ip netns exec $NETNS ip addr add ::42/128 dev lo
+ip netns exec $NETNS ip link set lo up
+
+SNMP_FLAGS="${SNMP_FLAGS} -DALL"
+
+# Test both client and server namespace socket handling:
+# both snmpd and snmpget are run in the default namespace,
+# but the socket exists only in the $NETNS namespace.
+. ./Stransport

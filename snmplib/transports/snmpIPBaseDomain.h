@@ -10,6 +10,7 @@
  * SNMP endpoint specification.
  * @param a     Address family, network address and port number.
  * @param iface Network interface name in ASCII format. May be empty.
+ * @param ns    Network namespace for this address. May be empty.
  */
 struct netsnmp_ep {
     union {
@@ -20,18 +21,21 @@ struct netsnmp_ep {
 #endif
     } a;
     char iface[16];
+    char ns[16];
 };
 
 /**
  * SNMP endpoint with the network name in ASCII format.
  * @param addr Network address or host name as an ASCII string.
  * @param iface Network interface, e.g. "lo".
+ * @param ns    Network namespace for this address. May be empty.
  * @param port Port number. "" means that no port number has been specified. "0"
  *   means "bind to any port".
  */
 struct netsnmp_ep_str {
     char     *addr;
     char     iface[16];
+    char     ns[16];
     char     port[6];
 };
 
@@ -39,6 +43,7 @@ struct netsnmp_transport_s;
 
 int netsnmp_parse_ep_str(struct netsnmp_ep_str *ep_str, const char *endpoint);
 int netsnmp_bindtodevice(int fd, const char *iface);
+int netsnmp_socketat(const char *ns, int domain, int type, int protocol);
 int netsnmp_ipbase_session_init(struct netsnmp_transport_s *transport,
                                 struct snmp_session *sess);
 

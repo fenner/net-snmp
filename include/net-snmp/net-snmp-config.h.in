@@ -904,6 +904,9 @@
 /* Define to 1 if you have the `setnetgrent' function. */
 #undef HAVE_SETNETGRENT
 
+/* Define to 1 if you have the `setns' function. */
+#undef HAVE_SETNS
+
 /* Define to 1 if you have the `setsid' function. */
 #undef HAVE_SETSID
 

@@ -392,6 +392,18 @@ IPv6-address:port
  '['IPv6-address']'[:port]
 .RE
 .PP
+When specifying a
+.I hostname
+or
+.I address
+above, an interface and a network namespace can be specified as well,
+with the syntax
+hostname[@interface[@namespace]][:port]
+or
+address[@interface[@namespace]][:port] .
+A namespace can be specified without an interface by leaving the
+interface field empty, i.e., hostname@@namespace[:port].
+.PP
 Note that <transport-specifier> strings are case-insensitive so that,
 for example, "tcp" and "TCP" are equivalent.  Here are some examples,
 along with their interpretation:
@@ -407,6 +419,14 @@ any case.
 .IR "udp:hostname"
 identical to the previous specification.  The "udp:" is redundant here
 since UDP/IPv4 is the default transport.
+.IR "udp:hostname@eth0"
+identical to the previous two specifications, but forces
+communication to occur over the eth0 interface using the
+SO_BINDTODEVICE socket option.
+.IR "udp:hostname@@cerulean"
+identical to the first two specifications, but forces
+communication to occur inside the network namespace named
+"cerulean".
 .TP 24
 .IR "TCP:hostname:1161"
 connect to
