@@ -4245,6 +4245,7 @@ _get_realloc_symbol(const oid * objid, size_t objidlen,
         netsnmp_ds_get_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT);
     char            intbuf[64];
     struct tree    *orgtree = subtree;
+    struct tree    *knowntree = NULL;
 
     if (!objid || !buf) {
         return NULL;
@@ -4280,6 +4281,11 @@ _get_realloc_symbol(const oid * objid, size_t objidlen,
                                                    subtree->label)) {
                     *buf_overflow = 1;
                 }
+
+                if (end_of_known) {
+                    *end_of_known = *out_len;
+                }
+                knowntree = subtree;
             }
 
             if (objidlen > 1) {
@@ -4300,13 +4306,9 @@ _get_realloc_symbol(const oid * objid, size_t objidlen,
             if (return_tree != NULL) {
                 return return_tree;
             } else {
-                return subtree;
+                return knowntree;
             }
         }
-    }
-
-    if (end_of_known) {
-        *end_of_known = *out_len;
     }
 
     /*

@@ -282,4 +282,12 @@ netSnmpExampleNotification OBJECT-TYPE
          and should no longer be used."
 ::= { netSnmpExampleNotifications 1 }
 
+--
+--  An object defined with an anonymous intermeidate node
+--  for testing object output in "-On" mode
+--
+
+netSnmpExampleAnonymousIntermediateNode OBJECT IDENTIFIER
+                                  ::= { netSnmpExamples 42 2 }
+
 END
