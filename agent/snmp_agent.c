@@ -3604,7 +3604,7 @@ handle_set_loop(netsnmp_agent_session *asp)
     while (asp->mode != FINISHED_FAILURE && asp->mode != FINISHED_SUCCESS) {
         handle_set(asp);
         if (netsnmp_check_for_delegated(asp)) {
-            return SNMP_ERR_NOERROR;
+            break;
 	}
         if (asp->pdu->flags & UCD_MSG_FLAG_ONE_PASS_ONLY) {
             return asp->status;
