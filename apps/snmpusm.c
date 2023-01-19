@@ -20,7 +20,15 @@
 #include <net-snmp/net-snmp-includes.h>
 #include <net-snmp/library/snmp_openssl.h>
 #if defined(HAVE_OPENSSL_DH_H) && defined(HAVE_LIBCRYPTO)
+#include <openssl/opensslv.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+#include <openssl/evp.h>
+#include <openssl/decoder.h>
+#include <openssl/core_names.h>
+#include <openssl/param_build.h>
+#else
 #include <openssl/dh.h>
+#endif /*openssl3 */
 #endif /* HAVE_OPENSSL_DH_H && HAVE_LIBCRYPTO */
 
 #if HAVE_STDLIB_H
@@ -180,14 +188,92 @@ setup_oid(oid * it, size_t * len, u_char * id, size_t idlen,
 }
 
 #if defined(HAVE_OPENSSL_DH_H) && defined(HAVE_LIBCRYPTO)
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+EVP_PKEY *
+generate_DH_key(EVP_PKEY *params_key) {
+    if (!params_key)
+        return NULL;
+    EVP_PKEY *key = NULL;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, params_key, NULL);
+    if (!ctx)
+          return NULL;
+
+    if (EVP_PKEY_keygen_init( ctx) <= 0) {
+          EVP_PKEY_CTX_free(ctx);
+          return NULL;
+    }
+    EVP_PKEY_generate(ctx, &key);
+    EVP_PKEY_CTX_free(ctx);
+    return key;
+}
+
+EVP_PKEY *
+get_DH_pub_key(const BIGNUM *p, const BIGNUM *g, const BIGNUM* pubkey) {
+    EVP_PKEY *key = NULL;
+    EVP_PKEY_CTX *ctx = NULL;
+    OSSL_PARAM_BLD *parambld = NULL;
+    OSSL_PARAM *params = NULL;
+
+    parambld = OSSL_PARAM_BLD_new();
+    if (!parambld ||
+        !OSSL_PARAM_BLD_push_BN(parambld, OSSL_PKEY_PARAM_PUB_KEY, pubkey) ||
+        !OSSL_PARAM_BLD_push_BN(parambld, OSSL_PKEY_PARAM_FFC_P, p) ||
+        !OSSL_PARAM_BLD_push_BN(parambld, OSSL_PKEY_PARAM_FFC_G, g)) {
+        goto cleanup;
+    }
+    params = OSSL_PARAM_BLD_to_param(parambld);
+    if (!params) {
+        goto cleanup;
+    }
+    ctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+    if (!ctx) {
+        goto cleanup;
+    }
+
+    if (EVP_PKEY_fromdata_init( ctx) != 1) {
+        printf("failed to init\n");
+        goto cleanup;
+    }
+    EVP_PKEY_fromdata(ctx, &key, EVP_PKEY_PUBLIC_KEY, params);
+cleanup:
+    EVP_PKEY_CTX_free(ctx);
+    OSSL_PARAM_BLD_free(parambld);
+    OSSL_PARAM_free(params);
+
+    return key;
+}
+
+int
+get_shared_secret(EVP_PKEY *privkey, EVP_PKEY *peerkey, unsigned char **secret) {
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(privkey, NULL);
+    size_t sl = 0;
+
+    if (!ctx ||
+        EVP_PKEY_derive_init(ctx) != 1 ||
+        EVP_PKEY_derive_set_peer_ex(ctx, peerkey, 0) != 1 ||
+        EVP_PKEY_derive(ctx, NULL, &sl) != 1) {
+        goto cleanup;
+    }
+
+    if (!*secret)
+        *secret = OPENSSL_malloc(sl);
+
+    EVP_PKEY_derive(ctx, *secret, &sl);
+
+cleanup:
+    EVP_PKEY_CTX_free(ctx);
+
+    return sl;
+}
+#endif /* openssl3 */
+
 int
 get_USM_DH_key(netsnmp_variable_list *vars, netsnmp_variable_list *dhvar,
                size_t outkey_len,
                netsnmp_pdu *pdu, const char *keyname,
                oid *keyoid, size_t keyoid_len) {
     u_char *dhkeychange;
-    DH *dh;
-    const BIGNUM *p, *g, *pub_key;
     BIGNUM *other_pub;
     u_char *key;
     size_t key_len;
@@ -195,8 +281,115 @@ get_USM_DH_key(netsnmp_variable_list *vars, netsnmp_variable_list *dhvar,
     dhkeychange = (u_char *) malloc(2 * vars->val_len * sizeof(char));
     if (!dhkeychange)
         return SNMPERR_GENERR;
-    
+
     memcpy(dhkeychange, vars->val.string, vars->val_len);
+
+    // We need to go through these contortions for compatiblity across OSSL3/OSSL1
+    // as we do not have a common interface to handle DH keys and thier parameters.
+    // 1. d2i functions are deprecated in openssl3 and recommended way is to use use
+    // OSSL_DECODER(3) instead, which is not avilable in older openssl version.
+    // ref: https://www.openssl.org/docs/man3.0/man3/d2i_DHparams.html
+    // 2. Key parameters cannot be directly accessed and need to use EVP_PKEY_get_params
+    // and variants.
+    // 3. DH specifics functions DH_generate_key and DH_compute_key are also deprecated.
+    // The recommended way is to use use higher level EVP_PKEY interfaces.
+    // ref: https://www.openssl.org/docs/man3.0/man3/DH_generate_key.html
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_PKEY *evpdh = NULL;
+    OSSL_DECODER_CTX *dctx = OSSL_DECODER_CTX_new_for_pkey(&evpdh, NULL, NULL, "DH",
+            OSSL_KEYMGMT_SELECT_ALL_PARAMETERS, NULL, NULL);
+    if (dctx == NULL) {
+        SNMP_FREE(dhkeychange);
+        fprintf(stderr, "failed to create OSSL decoder instance\n");
+        return SNMPERR_GENERR;
+    }
+
+    {
+        size_t pdata_len = dhvar->val_len;
+        unsigned char *pdata = dhvar->val.string;
+        OSSL_DECODER_from_data(dctx, ( const u_char **)&pdata, &pdata_len);
+        OSSL_DECODER_CTX_free(dctx);
+    }
+    if (!evpdh) {
+        SNMP_FREE(dhkeychange);
+        fprintf(stderr, "failed to read DH params from data\n");
+        return SNMPERR_GENERR;
+    }
+
+    BIGNUM *p=NULL, *g=NULL, *pub_key=NULL;
+    EVP_PKEY_get_bn_param(evpdh, OSSL_PKEY_PARAM_FFC_P, &p);
+    EVP_PKEY_get_bn_param(evpdh, OSSL_PKEY_PARAM_FFC_G, &g);
+    if (!g || !p) {
+        BN_free(p);
+        BN_free(g);
+        SNMP_FREE(dhkeychange);
+        return SNMPERR_GENERR;
+    }
+
+    { // generate DH key pair
+        EVP_PKEY *evp_dh_gen =  generate_DH_key(evpdh);
+        if (!evp_dh_gen) {
+            BN_free(p);
+            BN_free(g);
+            SNMP_FREE(dhkeychange);
+            fprintf(stderr, "failed to generate DH key pair\n");
+            return SNMPERR_GENERR;
+        }
+        EVP_PKEY_free(evpdh);
+        evpdh = evp_dh_gen;
+    }
+    EVP_PKEY_get_bn_param(evpdh, OSSL_PKEY_PARAM_PUB_KEY, &pub_key);
+    if (vars->val_len != (unsigned int)BN_num_bytes(pub_key)) {
+        SNMP_FREE(dhkeychange);
+        fprintf(stderr,"incorrect diffie-helman lengths (%lu != %d)\n",
+                    (unsigned long)vars->val_len, BN_num_bytes(pub_key));
+        BN_free(p);
+        BN_free(g);
+        return SNMPERR_GENERR;
+    }
+    BN_bn2bin(pub_key, dhkeychange + vars->val_len);
+    BN_free(pub_key);
+
+    key_len = BN_num_bytes(p);
+    if (!key_len) {
+        BN_free(p);
+        BN_free(g);
+        SNMP_FREE(dhkeychange);
+        return SNMPERR_GENERR;
+    }
+
+    // create other public key and generate shared secret in key
+    key = (u_char *)malloc(key_len * sizeof(u_char));
+    if (!key) {
+        BN_free(p);
+        BN_free(g);
+        SNMP_FREE(dhkeychange);
+        return SNMPERR_GENERR;
+    }
+
+    other_pub = BN_bin2bn(vars->val.string, vars->val_len, NULL);
+    if (!other_pub) {
+        SNMP_FREE(dhkeychange);
+        SNMP_FREE(key);
+        BN_free(p);
+        BN_free(g);
+        return SNMPERR_GENERR;
+    }
+    EVP_PKEY *peerkey = get_DH_pub_key(p, g, other_pub);
+    if (!peerkey){
+        BN_free(p);
+        BN_free(g);
+        SNMP_FREE(dhkeychange);
+        SNMP_FREE(key);
+        return SNMPERR_GENERR;
+    }
+    BN_free(p);
+    BN_free(g);
+
+    if(get_shared_secret( evpdh, peerkey, &key))
+#else
+    const BIGNUM *p, *g, *pub_key;
+    DH *dh;
 
     {
         const unsigned char *cp = dhvar->val.string;
@@ -245,7 +438,9 @@ get_USM_DH_key(netsnmp_variable_list *vars, netsnmp_variable_list *dhvar,
         return SNMPERR_GENERR;
     }
 
-    if (DH_compute_key(key, other_pub, dh)) {
+    if (DH_compute_key(key, other_pub, dh))
+#endif /* openssl3 */
+    {
         u_char *kp;
 
         printf("new %s key: 0x", keyname);
@@ -263,6 +458,10 @@ get_USM_DH_key(netsnmp_variable_list *vars, netsnmp_variable_list *dhvar,
     SNMP_FREE(dhkeychange);
     SNMP_FREE(other_pub);
     SNMP_FREE(key);
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_PKEY_free(peerkey);
+    EVP_PKEY_free(evpdh);
+#endif
 
     return SNMPERR_SUCCESS;
 }

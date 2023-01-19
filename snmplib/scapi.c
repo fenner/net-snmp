@@ -89,6 +89,9 @@ netsnmp_feature_child_of(usm_scapi, usm_support);
 #ifdef HAVE_AES
 #include <openssl/aes.h>
 #endif
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+#include <openssl/provider.h>
+#endif
 
 #ifndef NETSNMP_DISABLE_DES
 #ifdef HAVE_STRUCT_DES_KS_STRUCT_WEAK_KEY
@@ -203,6 +206,12 @@ static const netsnmp_priv_alg_info _priv_alg_info[] = {
     { -1, NULL, NULL, 0 , 0, 0, 0 },
 };
 
+
+#ifndef NETSNMP_DISABLE_DES
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+static OSSL_PROVIDER *legacyProvider = NULL;
+#endif
+#endif
 
 /*
  * sc_get_priv_alg(oid *privoid, u_int len)
@@ -1178,6 +1187,9 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
     const netsnmp_priv_alg_info *pai = NULL;
 #ifndef NETSNMP_DISABLE_DES
     int             pad, plast, pad_size = 0;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_CIPHER_CTX *des_ctx = NULL;
+#else
 #ifdef OLD_DES
     DES_key_schedule key_sch;
 #else
@@ -1185,6 +1197,7 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
     DES_key_schedule *key_sch = &key_sched_store;
 #endif /* OLD_DES */
     DES_cblock       key_struct;
+#endif /* openssl3 */
 #endif /* NETSNMP_DISABLE_DES */
 
     DEBUGTRACE;
@@ -1281,10 +1294,65 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
             memset(&pad_block[pad_size - pad], pad, pad);   /* filling in padblock */
         }
 
+        memcpy(my_iv, iv, ivlen);
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+        if (legacyProvider == NULL) {
+            legacyProvider = OSSL_PROVIDER_load(NULL, "legacy");
+            if (legacyProvider == NULL) {
+                DEBUGMSGTL(("scapi:encrypt", "openssl error: could not load legacy provider\n"));
+                QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+            }
+        }
+        des_ctx = EVP_CIPHER_CTX_new();
+        if (!des_ctx) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: CIPHER_CTX_new\n"));
+            QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+        }
+        int rc = EVP_EncryptInit_ex2(des_ctx, EVP_des_cbc(), key, my_iv, NULL);
+        if (rc != 1) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: init\n"));
+            QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+        }
+        EVP_CIPHER_CTX_set_padding(des_ctx, 0);
+        int outl = 0;
+
+        /*
+         * encrypt the data
+         */
+        int ciphertext_total = 0;
+        rc = EVP_EncryptUpdate(des_ctx, ciphertext, &outl, plaintext, plast);
+        if (rc != 1) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: update\n"));
+            QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+        }
+
+        ciphertext_total += outl;
+        outl = 0;
+        if (pad > 0) {
+            /*
+             * then encrypt the pad block
+             */
+            rc = EVP_EncryptUpdate(des_ctx, ciphertext+plast, &outl, pad_block,
+                  pad_size);
+
+            if (rc != 1) {
+                DEBUGMSGTL(("scapi:encrypt", "openssl error: update\n"));
+                QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+            }
+            ciphertext_total += outl;
+            outl = 0;
+        }
+        rc = EVP_EncryptFinal(des_ctx, ciphertext + ciphertext_total, &outl);
+        if (rc != 1) {
+            DEBUGMSGTL(("scapi:encrypt", "openssl error: final\n"));
+            QUITFUN(SNMPERR_GENERR, sc_encrypt_quit);
+        }
+        ciphertext_total += outl;
+        *ctlen = ciphertext_total;
+#else
         memcpy(key_struct, key, sizeof(key_struct));
         (void) DES_key_sched(&key_struct, key_sch);
 
-        memcpy(my_iv, iv, ivlen);
         /*
          * encrypt the data 
          */
@@ -1300,6 +1368,7 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
         } else {
             *ctlen = plast;
         }
+#endif /* openssl3 */
     }
 #endif
 #if defined(NETSNMP_USE_OPENSSL) && defined(HAVE_AES)
@@ -1356,11 +1425,15 @@ sc_encrypt(const oid * privtype, size_t privtypelen,
     memset(my_iv, 0, sizeof(my_iv));
     memset(pad_block, 0, sizeof(pad_block));
 #ifndef NETSNMP_DISABLE_DES
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_CIPHER_CTX_free(des_ctx);
+#else /* openssl3 */
     memset(key_struct, 0, sizeof(key_struct));
 #ifdef OLD_DES
     memset(&key_sch, 0, sizeof(key_sch));
 #else
     memset(&key_sched_store, 0, sizeof(key_sched_store));
+#endif
 #endif
 #endif
     return rval;
@@ -1461,6 +1534,9 @@ sc_decrypt(const oid * privtype, size_t privtypelen,
     int             rval = SNMPERR_SUCCESS;
     u_char          my_iv[128];
 #ifndef NETSNMP_DISABLE_DES
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_CIPHER_CTX *des_ctx = NULL;
+#else /* openssl3 */
 #ifdef OLD_DES
     DES_key_schedule key_sch;
 #else
@@ -1468,6 +1544,7 @@ sc_decrypt(const oid * privtype, size_t privtypelen,
     DES_key_schedule *key_sch = &key_sched_store;
 #endif
     DES_cblock      key_struct;
+#endif
 #endif
     const netsnmp_priv_alg_info *pai = NULL;
 
@@ -1517,13 +1594,44 @@ sc_decrypt(const oid * privtype, size_t privtypelen,
     memset(my_iv, 0, sizeof(my_iv));
 #ifndef NETSNMP_DISABLE_DES
     if (USM_CREATE_USER_PRIV_DES == (pai->type & USM_PRIV_MASK_ALG)) {
+        memcpy(my_iv, iv, ivlen);
+#if OPENSSL_VERSION_NUMBER >=0x30000000L
+        if (legacyProvider == NULL) {
+            legacyProvider = OSSL_PROVIDER_load(NULL, "legacy");
+            if (legacyProvider == NULL) {
+                DEBUGMSGTL(("scapi:encrypt", "openssl error: could not load legacy provider\n"));
+                QUITFUN(SNMPERR_GENERR, sc_decrypt_quit);
+            }
+        }
+        des_ctx = EVP_CIPHER_CTX_new();
+        if (!des_ctx) {
+            QUITFUN(SNMPERR_GENERR, sc_decrypt_quit);
+        }
+        int rc = EVP_DecryptInit_ex2(des_ctx, EVP_des_cbc(), key, my_iv, NULL);
+        if (rc != 1) {
+            QUITFUN(SNMPERR_GENERR, sc_decrypt_quit);
+        }
+        EVP_CIPHER_CTX_set_padding(des_ctx, 0 );
+        int length;
+        rc = EVP_DecryptUpdate(des_ctx, plaintext, &length, ciphertext, ctlen);
+        if (rc != 1) {
+            QUITFUN(SNMPERR_GENERR, sc_decrypt_quit);
+        }
+        int plaintextLength = length;
+        rc = EVP_DecryptFinal_ex(des_ctx, plaintext + plaintextLength, &length);
+        if (rc != 1) {
+            QUITFUN(SNMPERR_GENERR, sc_decrypt_quit);
+        }
+        plaintextLength += length;
+        *ptlen = plaintextLength;
+#else
         memcpy(key_struct, key, sizeof(key_struct));
         (void) DES_key_sched(&key_struct, key_sch);
 
-        memcpy(my_iv, iv, ivlen);
         DES_cbc_encrypt(ciphertext, plaintext, ctlen, key_sch,
                         (DES_cblock *) my_iv, DES_DECRYPT);
         *ptlen = ctlen;
+#endif
     }
 #endif
 #if defined(NETSNMP_USE_OPENSSL) && defined(HAVE_AES)
@@ -1570,12 +1678,16 @@ sc_decrypt(const oid * privtype, size_t privtypelen,
      */
   sc_decrypt_quit:
 #ifndef NETSNMP_DISABLE_DES
+#if OPENSSL_VERSION_NUMBER >=0x30000000L
+    EVP_CIPHER_CTX_free(des_ctx);
+#else
 #ifdef OLD_DES
     memset(&key_sch, 0, sizeof(key_sch));
 #else
     memset(&key_sched_store, 0, sizeof(key_sched_store));
 #endif
     memset(key_struct, 0, sizeof(key_struct));
+#endif
 #endif
     memset(my_iv, 0, sizeof(my_iv));
     return rval;
