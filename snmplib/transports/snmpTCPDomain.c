@@ -189,7 +189,7 @@ netsnmp_tcp_transport(const struct netsnmp_ep *ep, int local)
         if (ep->ns && *ep->ns) {
             t->sock = netsnmp_socketat( ep->ns, PF_INET, SOCK_STREAM, 0);
         } else {
-            t->sock = (int) socket(PF_INET, SOCK_STREAM, 0);
+            t->sock = socket(PF_INET, SOCK_STREAM, 0);
         }
     }
     if (t->sock < 0)
