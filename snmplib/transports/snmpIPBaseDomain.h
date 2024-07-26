@@ -6,6 +6,10 @@
 #include <netinet/in.h>
 #endif
 
+#ifndef NETSNMP_NETNS_MAX_SIZE
+#define NETSNMP_NETNS_MAX_SIZE 16
+#endif
+
 /**
  * SNMP endpoint specification.
  * @param a     Address family, network address and port number.
@@ -21,7 +25,7 @@ struct netsnmp_ep {
 #endif
     } a;
     char iface[16];
-    char ns[16];
+    char ns[NETSNMP_NETNS_MAX_SIZE];
 };
 
 /**
@@ -35,7 +39,7 @@ struct netsnmp_ep {
 struct netsnmp_ep_str {
     char     *addr;
     char     iface[16];
-    char     ns[16];
+    char     ns[NETSNMP_NETNS_MAX_SIZE];
     char     port[6];
 };
 

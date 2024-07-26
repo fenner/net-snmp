@@ -1700,6 +1700,9 @@
 /* Define if you want to remove all non-essential code features. */
 #undef NETSNMP_MINIMAL_CODE
 
+/* Maximum size of a Linux network namespace name */
+#undef NETSNMP_NETNS_MAX_SIZE
+
 /* Define if you want to only support sending notifications */
 #undef NETSNMP_NOTIFY_ONLY
 

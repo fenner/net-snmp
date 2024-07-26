@@ -167,17 +167,27 @@ int netsnmp_socketat(const char *ns, int domain, int type, int protocol)
     int s;
     int saved_errno;
     sigset_t set, oset;
-    char net_path[255];
+    char *net_path;
+    int net_path_len;
 
     f = open( "/proc/self/ns/net", O_RDONLY );
     if ( f < 0 ) {
         DEBUGMSGTL(("netsnmp_ipbase", "cannot access my own network namespace: %s\n", strerror( errno ) ));
         return -1;
     }
-    snprintf(net_path, sizeof(net_path), "%s/%s", "/var/run/netns", ns);
-    newns = open( net_path, O_RDONLY );
-    if (newns < 0 ) {
+    net_path_len = strlen( ns ) + sizeof( "/var/run/netns/" );
+    net_path = calloc( 1, net_path_len );
+    snprintf( net_path, net_path_len, "%s/%s", "/var/run/netns", ns );
+    if ( !net_path ) {
+        DEBUGMSGTL(("netsnmp_ipbase", "cannot allocate memory for netns path\n"));
         close( f );
+        return -1;
+    }
+    newns = open( net_path, O_RDONLY );
+    if ( newns < 0 ) {
+        DEBUGMSGTL(("netsnmp_ipbase", "cannot open network namespace %s: %s\n", net_path, strerror( errno ) ));
+        close( f );
+        free( net_path );
         return -1;
     }
     DEBUGMSGTL(("netsnmp_ipbase", "setns to %s\n", net_path));
@@ -208,6 +218,7 @@ int netsnmp_socketat(const char *ns, int domain, int type, int protocol)
 fail:
     /* Set signals back now that we're done */
     sigprocmask(SIG_SETMASK, &oset, NULL);
+    free( net_path );
     close( newns );
     close( f );
     if ( s < 0 ) {

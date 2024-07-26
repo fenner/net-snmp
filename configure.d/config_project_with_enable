@@ -1208,3 +1208,13 @@ if test "x$with_mysql" = "xyes"; then
   AC_DEFINE(NETSNMP_USE_MYSQL, 1,
     [define if you are using the mysql code for snmptrapd ...])
 fi
+
+##
+#    Project: Linux network namespace max size
+##
+NETSNMP_ARG_WITH(netns-max-size,
+[  --with-netns-max-size=ARG      Use ARG for the maximum size of a Linux network namespace.],[
+   if test "$withval" = yes; then
+    AC_MSG_ERROR([ Please provide a positive number for the network namespace max size])
+   fi
+   AC_DEFINE_UNQUOTED(NETSNMP_NETNS_MAX_SIZE, $withval, [Maximum size of a Linux network namespace name])])
