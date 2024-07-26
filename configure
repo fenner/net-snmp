@@ -1111,6 +1111,8 @@ with_mnttab
 enable_mnttab
 with_mysql
 enable_mysql
+with_netns_max_size
+enable_netns_max_size
 '
       ac_precious_vars='build_alias
 host_alias
@@ -2101,6 +2103,7 @@ Network Buffers:
                           Mount table location. The default is to autodetect
                           this.
   --with-mysql            Include support for MySQL.
+  --with-netns-max-size=ARG      Use ARG for the maximum size of a Linux network namespace.
 
 Some influential environment variables:
   CC          C compiler command
@@ -15843,6 +15846,29 @@ if test "x$with_mysql" = "xyes"; then
 printf "%s\n" "#define NETSNMP_USE_MYSQL 1" >>confdefs.h
 
 fi
+
+##
+#    Project: Linux network namespace max size
+##
+
+# Check whether --with-netns-max-size was given.
+if test ${with_netns_max_size+y}
+then :
+  withval=$with_netns_max_size;
+   if test "$withval" = yes; then
+    as_fn_error $? " Please provide a positive number for the network namespace max size" "$LINENO" 5
+   fi
+
+printf "%s\n" "#define NETSNMP_NETNS_MAX_SIZE $withval" >>confdefs.h
+
+fi
+
+   # Check whether --enable-netns-max-size was given.
+if test ${enable_netns_max_size+y}
+then :
+  enableval=$enable_netns_max_size; as_fn_error $? "Invalid option. Use --with-netns-max-size/--without-netns-max-size instead" "$LINENO" 5
+fi
+
 
 ##
 # Protect against CFLAGS with -Werror which causes failures for some tests
@@ -36010,6 +36036,16 @@ printf "%s\n" "no" >&6; }
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam \
     conftest$ac_exeext conftest.$ac_ext
+
+#   Check whether the setns function is available.
+#
+ac_fn_c_check_func "$LINENO" "setns" "ac_cv_func_setns"
+if test "x$ac_cv_func_setns" = xyes
+then :
+  printf "%s\n" "#define HAVE_SETNS 1" >>confdefs.h
+
+fi
+
 
 #   Check whether struct in_pktinfo.ipi_spec_dst is available.
 #
